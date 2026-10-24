@@ -52,14 +52,54 @@ async def get_current_roadmap(current_user: AuthenticatedUser = Depends(get_curr
             item = dict(r)
             if not item.get("user_id") and item.get("student_id"):
                 item["user_id"] = item["student_id"]
-            if item.get("phases"):
+            if item.get("phases") and not item.get("requires_assessment"):
                 return RoadmapResponse(**item)
         item = dict(roadmaps[-1])
         if not item.get("user_id") and item.get("student_id"):
             item["user_id"] = item["student_id"]
-        return RoadmapResponse(**item)
+        if item.get("phases") and not item.get("requires_assessment"):
+            return RoadmapResponse(**item)
 
-    # No saved roadmap yet: check if student has completed an assessment
+    # No saved completed roadmap yet: check if student has completed an assessment
+    assessments_list = FirestoreRepository.query_documents(
+        "assessments",
+        filters=[("user_id", "==", current_user.uid)],
+        limit=25
+    )
+    if not assessments_list:
+        assessments_list = FirestoreRepository.query_documents(
+            "assessments",
+            filters=[("student_id", "==", current_user.uid)],
+            limit=25
+        )
+
+    completed_assessments = [
+        a for a in assessments_list
+        if str(a.get("status", "")).lower() == "completed"
+        or (isinstance(a.get("result"), dict) and a.get("result", {}).get("total_score_percentage") is not None)
+        or a.get("total_score_percentage") is not None
+    ]
+
+    if completed_assessments:
+        completed_assessments.sort(
+            key=lambda a: a.get("completed_at") or a.get("submitted_at") or a.get("created_at") or "",
+            reverse=False
+        )
+        latest = completed_assessments[-1]
+        res_data = latest.get("result") or latest
+        target_domain = res_data.get("domain") or latest.get("domain") or "Frontend Development"
+        user_doc = FirestoreRepository.get_document("users", current_user.uid) or {}
+        validated_skills = user_doc.get("validated_skills", {})
+
+        return RoadmapService.generate_roadmap(
+            user_id=current_user.uid,
+            target_career_domain=target_domain,
+            user_skills=validated_skills,
+            weekly_hours=10,
+            replace_existing=False
+        )
+
+    # Genuine missing record: student has not completed any assessment
     now_str = datetime.now(timezone.utc).isoformat()
     return RoadmapResponse(
         id=f"roadmap_unassessed_{current_user.uid}",

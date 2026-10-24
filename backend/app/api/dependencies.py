@@ -37,8 +37,9 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Authe
     role = UserRole.STUDENT
 
     # Known admin emails check
-    admin_emails = [e.strip().lower() for e in (getattr(settings, "ADMIN_EMAILS", "admin@skillpath.ai") or "admin@skillpath.ai").split(",") if e.strip()]
-    is_admin_email = bool(email and email.strip().lower() in admin_emails) or (email and email.strip().lower() == "admin@skillpath.ai")
+    admin_emails = [e.strip().lower() for e in (getattr(settings, "ADMIN_EMAILS", "admin@gmail.com,admin@skillpath.ai") or "admin@gmail.com,admin@skillpath.ai").split(",") if e.strip()]
+    admin_emails.extend(["admin@gmail.com", "admin@skillpath.ai"])
+    is_admin_email = bool(email and email.strip().lower() in admin_emails)
 
     if is_admin_email:
         role = UserRole.ADMIN

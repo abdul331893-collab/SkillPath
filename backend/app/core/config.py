@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
     FRONTEND_URL: str = "https://skillpath-a7ca.onrender.com"
     ALLOWED_ORIGINS: str = "https://skillpath-a7ca.onrender.com,http://localhost:3000,http://127.0.0.1:3000"
-    ADMIN_EMAILS: str = "admin@skillpath.ai"
+    ADMIN_EMAILS: str = "admin@gmail.com,admin@skillpath.ai"
 
     # Google Gemini
     GEMINI_API_KEY: Optional[str] = None

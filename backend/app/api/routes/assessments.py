@@ -85,11 +85,23 @@ async def get_assessment_history(current_user: AuthenticatedUser = Depends(get_c
     """Retrieves student's previous assessment attempts."""
     attempts = FirestoreRepository.query_documents(
         "assessments",
-        filters=[("user_id", "==", current_user.uid), ("status", "==", "completed")],
+        filters=[("user_id", "==", current_user.uid)],
         limit=50
     )
+    if not attempts:
+        attempts = FirestoreRepository.query_documents(
+            "assessments",
+            filters=[("student_id", "==", current_user.uid)],
+            limit=50
+        )
+    completed_attempts = [
+        a for a in attempts
+        if str(a.get("status", "")).lower() == "completed"
+        or (isinstance(a.get("result"), dict) and a.get("result", {}).get("total_score_percentage") is not None)
+        or a.get("total_score_percentage") is not None
+    ]
     results = []
-    for a in attempts:
+    for a in completed_attempts:
         res_data = a.get("result") or a
         if "total_score_percentage" in res_data:
             results.append(AssessmentResultResponse(**res_data))
@@ -100,13 +112,25 @@ async def get_latest_assessment(current_user: AuthenticatedUser = Depends(get_cu
     """Retrieves the latest completed assessment result for the current user."""
     attempts = FirestoreRepository.query_documents(
         "assessments",
-        filters=[("user_id", "==", current_user.uid), ("status", "==", "completed")],
-        limit=10
+        filters=[("user_id", "==", current_user.uid)],
+        limit=25
     )
     if not attempts:
+        attempts = FirestoreRepository.query_documents(
+            "assessments",
+            filters=[("student_id", "==", current_user.uid)],
+            limit=25
+        )
+    completed_attempts = [
+        a for a in attempts
+        if str(a.get("status", "")).lower() == "completed"
+        or (isinstance(a.get("result"), dict) and a.get("result", {}).get("total_score_percentage") is not None)
+        or a.get("total_score_percentage") is not None
+    ]
+    if not completed_attempts:
         return None
-    attempts.sort(key=lambda a: a.get("completed_at") or a.get("created_at") or "", reverse=True)
-    latest = attempts[0]
+    completed_attempts.sort(key=lambda a: a.get("completed_at") or a.get("submitted_at") or a.get("created_at") or "", reverse=True)
+    latest = completed_attempts[0]
     res_data = latest.get("result") or latest
     if "total_score_percentage" in res_data:
         return AssessmentResultResponse(**res_data)

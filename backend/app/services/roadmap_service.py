@@ -139,10 +139,27 @@ class RoadmapService:
         required_skills = domain.get("required_skills", []) if domain else []
 
         # 2. Check for completed assessments (MANDATORY REQUIREMENT)
-        completed_assessments = FirestoreRepository.query_documents(
+        assessments_list = FirestoreRepository.query_documents(
             "assessments",
-            filters=[("user_id", "==", user_id), ("status", "==", "completed")],
-            limit=10
+            filters=[("user_id", "==", user_id)],
+            limit=25
+        )
+        if not assessments_list:
+            assessments_list = FirestoreRepository.query_documents(
+                "assessments",
+                filters=[("student_id", "==", user_id)],
+                limit=25
+            )
+
+        completed_assessments = [
+            a for a in assessments_list
+            if str(a.get("status", "")).lower() == "completed"
+            or (isinstance(a.get("result"), dict) and a.get("result", {}).get("total_score_percentage") is not None)
+            or a.get("total_score_percentage") is not None
+        ]
+        completed_assessments.sort(
+            key=lambda a: a.get("completed_at") or a.get("submitted_at") or a.get("created_at") or "",
+            reverse=False
         )
 
         if not completed_assessments:

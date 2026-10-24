@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { useAuth } from "@/lib/auth-context";
-import { Compass, ArrowRight, ShieldCheck, UserCheck, AlertCircle } from "lucide-react";
+import { Compass, ArrowRight, AlertCircle } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,28 +21,14 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await login(email, password);
-      router.push("/career-assessment");
-    } catch (err: any) {
-      setError(err.message || "Failed to log in");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleQuickDemo = async (role: "student" | "admin") => {
-    setLoading(true);
-    setError(null);
-    try {
-      if (role === "admin") {
-        await login("admin@skillpath.ai", "admin123", true);
+      const loggedUser = await login(email, password);
+      if (loggedUser?.role === "admin") {
         router.push("/admin");
       } else {
-        await login("student@skillpath.ai", "student123", false);
         router.push("/career-assessment");
       }
     } catch (err: any) {
-      setError(err.message || "Demo login failed");
+      setError(err.message || "Failed to log in");
     } finally {
       setLoading(false);
     }
@@ -109,30 +95,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Quick Demo Login Credentials */}
-          <div className="mt-6 pt-6 border-t border-slate-100">
-            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3 text-center">
-              Quick Role-Based Demonstration
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => handleQuickDemo("student")}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-semibold transition"
-              >
-                <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
-                <span>Student Demo</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickDemo("admin")}
-                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-semibold transition"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-purple-600" />
-                <span>Admin Demo</span>
-              </button>
-            </div>
-          </div>
 
           <div className="mt-6 text-center text-xs text-slate-500">
             Don't have an account?{" "}

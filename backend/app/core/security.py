@@ -173,7 +173,9 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
                     email_str = unverified_payload.get("email", "")
                     role_str = unverified_payload.get("role")
                     if not role_str:
-                        if email_str.strip().lower() == "admin@skillpath.ai":
+                        admin_emails = [e.strip().lower() for e in (getattr(settings, "ADMIN_EMAILS", "admin@gmail.com,admin@skillpath.ai") or "admin@gmail.com,admin@skillpath.ai").split(",") if e.strip()]
+                        admin_emails.extend(["admin@gmail.com", "admin@skillpath.ai"])
+                        if email_str.strip().lower() in admin_emails:
                             role_str = "admin"
                         else:
                             role_str = "student"

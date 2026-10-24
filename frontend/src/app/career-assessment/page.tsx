@@ -185,6 +185,9 @@ export default function CareerAssessmentPage() {
           setAssessmentResult(latest);
           if (latest.total_score_percentage !== undefined) {
             hasCompletedAssessment = true;
+            if (latest.domain) {
+              setTargetDomain(latest.domain);
+            }
           }
         }
 
@@ -192,13 +195,21 @@ export default function CareerAssessmentPage() {
           setCareerRecs(savedRecsRes.value);
         }
 
-        if (savedRoadmapRes.status === "fulfilled" && savedRoadmapRes.value) {
-          setRoadmap(savedRoadmapRes.value);
+        const initialRoadmap = savedRoadmapRes.status === "fulfilled" ? savedRoadmapRes.value : null;
+        if (initialRoadmap) {
+          if (hasCompletedAssessment && initialRoadmap.requires_assessment) {
+            setRoadmap(null);
+          } else {
+            setRoadmap(initialRoadmap);
+          }
         }
 
         // If student already has a completed assessment report, default to Step 4 so results are immediately visible
         if (hasCompletedAssessment) {
           setCurrentStep(4);
+          if (!initialRoadmap || initialRoadmap.requires_assessment) {
+            loadRoadmapData(false);
+          }
         } else {
           // Check for in-flight assessment generation job
           try {
@@ -553,10 +564,13 @@ export default function CareerAssessmentPage() {
       setAssessmentResult(report);
       setTestStarted(false);
       setShowSubmitModal(false);
+      setRoadmap(null);
       setCurrentStep(4);
       if (typeof window !== "undefined") {
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
+      // Pre-load evidence-based roadmap calibrated to this submission
+      loadRoadmapData(true);
     } catch (err: any) {
       console.error("Assessment submission error:", err);
       setSubmissionError(err.message || "Failed to submit assessment. Please check your connection and retry.");
@@ -569,9 +583,10 @@ export default function CareerAssessmentPage() {
   const loadRoadmapData = async (replaceExisting: boolean = false) => {
     setLoadingRoadmap(true);
     try {
+      const activeToken = token || (typeof window !== "undefined" ? localStorage.getItem("skillpath_token") : null);
       if (!replaceExisting) {
         try {
-          const existing = await apiRequest<any>("/roadmaps/latest", { token, silent: true });
+          const existing = await apiRequest<any>("/roadmaps/latest", { token: activeToken, silent: true });
           if (existing && existing.id && !existing.requires_assessment) {
             setRoadmap(existing);
             setLoadingRoadmap(false);
@@ -585,7 +600,7 @@ export default function CareerAssessmentPage() {
       // Generate roadmap targeted to weaknesses
       const data = await apiRequest<any>("/roadmaps/generate", {
         method: "POST",
-        token,
+        token: activeToken,
         body: JSON.stringify({
           target_career_domain: targetDomain,
           weekly_hours_available: 12,
@@ -689,7 +704,7 @@ export default function CareerAssessmentPage() {
   // Step Switcher trigger
   const goToStep = (stepNumber: number) => {
     setCurrentStep(stepNumber);
-    if (stepNumber === 5 && !roadmap) {
+    if (stepNumber === 5 && (!roadmap || roadmap.requires_assessment)) {
       loadRoadmapData();
     }
     if (stepNumber === 6 && careerRecs.length === 0) {
@@ -1849,7 +1864,7 @@ export default function CareerAssessmentPage() {
                 <div className="h-28 bg-slate-200 rounded-xl"></div>
                 <div className="h-64 bg-slate-200 rounded-xl"></div>
               </div>
-            ) : roadmap?.requires_assessment ? (
+            ) : (roadmap?.requires_assessment && !assessmentResult) ? (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-8 text-center space-y-4">
                 <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
                   <AlertCircle className="w-6 h-6" />
@@ -1867,6 +1882,27 @@ export default function CareerAssessmentPage() {
                   >
                     <Sparkles className="w-4 h-4" />
                     <span>Go to Skill Assessment (Step 3)</span>
+                  </button>
+                </div>
+              </div>
+            ) : (!roadmap || roadmap.requires_assessment) && assessmentResult ? (
+              <div className="bg-purple-50/60 border border-purple-100 rounded-2xl p-8 text-center space-y-4">
+                <div className="w-12 h-12 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center mx-auto">
+                  <Sparkles className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-base font-bold text-purple-900">Synthesizing Your Evidence-Based Roadmap</h3>
+                  <p className="text-xs text-purple-700 max-w-md mx-auto leading-relaxed">
+                    Your assessment results have been recorded. Click below to load your personalized remediation curriculum.
+                  </p>
+                </div>
+                <div>
+                  <button
+                    onClick={() => loadRoadmapData(true)}
+                    className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs transition"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Generate Evidence-Based Roadmap</span>
                   </button>
                 </div>
               </div>

@@ -38,6 +38,12 @@ async def sync_user_profile(
     name = (req.name or current_user.name or clean_email.split("@")[0].capitalize()).strip()
     now_str = datetime.now(timezone.utc).isoformat()
 
+    from app.core.config import settings
+    admin_emails = [e.strip().lower() for e in (getattr(settings, "ADMIN_EMAILS", "admin@gmail.com,admin@skillpath.ai") or "admin@gmail.com,admin@skillpath.ai").split(",") if e.strip()]
+    admin_emails.extend(["admin@gmail.com", "admin@skillpath.ai"])
+    is_admin = (current_user.role.value == "admin") or (clean_email in admin_emails)
+    role_to_assign = "admin" if is_admin else "student"
+
     doc = FirestoreRepository.get_document("users", uid)
     if not doc:
         # Check if an existing profile exists with this email to avoid duplicates
@@ -49,6 +55,8 @@ async def sync_user_profile(
         if existing_with_email and existing_with_email[0].get("uid") != uid:
             doc = existing_with_email[0]
             doc["uid"] = uid
+            if is_admin:
+                doc["role"] = "admin"
             doc["updated_at"] = now_str
             FirestoreRepository.set_document("users", uid, doc)
         else:
@@ -56,7 +64,7 @@ async def sync_user_profile(
                 "uid": uid,
                 "email": clean_email,
                 "name": name,
-                "role": "student",
+                "role": role_to_assign,
                 "is_active": True,
                 "education_level": "Undergraduate",
                 "institution": "University / College",
@@ -73,6 +81,9 @@ async def sync_user_profile(
             FirestoreRepository.set_document("users", uid, doc)
     else:
         updates = {}
+        if is_admin and doc.get("role") != "admin":
+            updates["role"] = "admin"
+            doc["role"] = "admin"
         if name and not doc.get("name"):
             updates["name"] = name
         if clean_email and not doc.get("email"):
@@ -86,7 +97,7 @@ async def sync_user_profile(
             uid=uid,
             email=doc.get("email", clean_email),
             name=doc.get("name", name),
-            role=doc.get("role", "student"),
+            role=doc.get("role", role_to_assign),
             is_active=doc.get("is_active", True),
             created_at=doc.get("created_at", now_str),
         ),
@@ -263,8 +274,16 @@ async def login_user(req: UserLoginRequest):
             detail="Invalid email or password."
         )
 
+    from app.core.config import settings
+    admin_emails = [e.strip().lower() for e in (getattr(settings, "ADMIN_EMAILS", "admin@gmail.com,admin@skillpath.ai") or "admin@gmail.com,admin@skillpath.ai").split(",") if e.strip()]
+    admin_emails.extend(["admin@gmail.com", "admin@skillpath.ai"])
+    is_admin = clean_email in admin_emails
+
     uid = user["uid"]
-    role = user.get("role", "student")
+    role = "admin" if is_admin else user.get("role", "student")
+    if is_admin and user.get("role") != "admin":
+        FirestoreRepository.update_document("users", uid, {"role": "admin"})
+        user["role"] = "admin"
     token = f"dev-user-{uid}"
 
     return AuthResponse(

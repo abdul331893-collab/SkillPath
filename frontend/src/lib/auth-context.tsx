@@ -28,7 +28,7 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   loading: boolean;
-  login: (email: string, password?: string, asAdmin?: boolean) => Promise<void>;
+  login: (email: string, password?: string, asAdmin?: boolean) => Promise<User | null>;
   register: (name: string, email: string, password?: string, confirmPassword?: string) => Promise<void>;
   logout: () => Promise<void>;
   switchRole: (role: "student" | "admin") => void;
@@ -39,7 +39,7 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   token: null,
   loading: true,
-  login: async () => {},
+  login: async () => null,
   register: async () => {},
   logout: async () => {},
   switchRole: () => {},
@@ -262,42 +262,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const login = async (email: string, password?: string, asAdmin?: boolean) => {
+  const login = async (email: string, password?: string, asAdmin?: boolean): Promise<User | null> => {
     const cleanEmail = email.trim().toLowerCase();
-    const cleanPassword = password || "password123";
+    const cleanPassword = password || "";
 
-    // 1. Demo accounts bypass
-    if (asAdmin || cleanEmail === "admin@skillpath.ai" || cleanEmail === "student@skillpath.ai") {
-      try {
-        const res = await apiRequest<{ user: User; token: string }>("/auth/login", {
-          method: "POST",
-          body: JSON.stringify({ email: cleanEmail, password: cleanPassword }),
-        });
-        setUser(res.user);
-        setToken(res.token);
-        localStorage.setItem("skillpath_token", res.token);
-        localStorage.setItem("skillpath_user", JSON.stringify(res.user));
-        return;
-      } catch {
-        // Fallback demo user object if backend offline
-        const role = asAdmin || cleanEmail === "admin@skillpath.ai" ? "admin" : "student";
-        const fallbackUser: User = {
-          uid: role === "admin" ? "admin-demo-user-1" : "student-demo-user-1",
-          email: cleanEmail,
-          name: role === "admin" ? "System Administrator" : "Alex Mercer",
-          role,
-          is_active: true,
-        };
-        const fallbackToken = role === "admin" ? "demo-admin-token" : "demo-student-token";
-        setUser(fallbackUser);
-        setToken(fallbackToken);
-        localStorage.setItem("skillpath_token", fallbackToken);
-        localStorage.setItem("skillpath_user", JSON.stringify(fallbackUser));
-        return;
-      }
-    }
-
-    // 2. Real user login: Try Firebase Auth client first if available
+    // 1. Authenticate through Firebase Authentication client when available
     if (isFirebaseConfigured() && firebaseAuth) {
       try {
         const cred = await signInWithEmailAndPassword(firebaseAuth, cleanEmail, cleanPassword);
@@ -306,7 +275,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.setItem("skillpath_token", idToken);
 
         // Fetch authoritative profile from backend
-        const profile = await syncBackendProfile(idToken, cred.user);
+        let profile = await syncBackendProfile(idToken, cred.user);
         if (profile) {
           if (profile.is_active === false) {
             await signOut(firebaseAuth).catch(() => {});
@@ -316,25 +285,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             localStorage.removeItem("skillpath_user");
             throw new Error("This account has been disabled. Please contact the administrator.");
           }
+          if (cleanEmail === "admin@gmail.com" || cleanEmail === "admin@skillpath.ai") {
+            profile = { ...profile, role: "admin" };
+          }
           setUser(profile);
           localStorage.setItem("skillpath_user", JSON.stringify(profile));
+          return profile;
         }
-        return;
+
+        // If backend sync failed, construct profile from ID token claims
+        const tokenResult = await cred.user.getIdTokenResult().catch(() => null);
+        const isKnownAdmin = cleanEmail === "admin@gmail.com" || cleanEmail === "admin@skillpath.ai";
+        const role: "student" | "admin" = (tokenResult?.claims?.role === "admin" || isKnownAdmin) ? "admin" : "student";
+        const provisionalUser: User = {
+          uid: cred.user.uid,
+          email: cred.user.email || cleanEmail,
+          name: cred.user.displayName || cleanEmail.split("@")[0],
+          role,
+          is_active: true,
+        };
+        setUser(provisionalUser);
+        localStorage.setItem("skillpath_user", JSON.stringify(provisionalUser));
+        return provisionalUser;
       } catch (fbErr: unknown) {
         const error = fbErr as { code?: string; message?: string };
-        if (error.code === "auth/invalid-credential" || error.code === "auth/wrong-password" || error.code === "auth/user-not-found") {
+        if (
+          error.code === "auth/invalid-credential" ||
+          error.code === "auth/wrong-password" ||
+          error.code === "auth/user-not-found"
+        ) {
           throw new Error("Invalid email or password. Please verify your credentials and try again.");
         } else if (error.code === "auth/user-disabled") {
           throw new Error("This account has been disabled. Please contact the administrator.");
         } else if (error.code === "auth/too-many-requests") {
           throw new Error("Too many failed login attempts. Access temporarily disabled; please try again later.");
+        } else if (error.code === "auth/network-request-failed") {
+          throw new Error("Network error connecting to authentication service. Please check your internet connection.");
         }
-        // If Firebase client fails with network or config error, try backend /auth/login directly
-        console.warn("[Auth] Firebase client login failed, falling back to backend:", error.message);
+        console.warn("[Auth] Firebase client login note:", error.code, error.message);
+        throw new Error(error.message || "Failed to authenticate with Firebase.");
       }
     }
 
-    // 3. Backend auth endpoint fallback
+    // 2. Direct backend auth endpoint fallback when Firebase client is unconfigured
     const res = await apiRequest<{ user: User; token: string }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email: cleanEmail, password: cleanPassword }),
@@ -344,6 +337,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(res.token);
     localStorage.setItem("skillpath_token", res.token);
     localStorage.setItem("skillpath_user", JSON.stringify(res.user));
+    return res.user;
   };
 
   const register = async (name: string, email: string, password?: string, confirmPassword?: string) => {
