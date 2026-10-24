@@ -6,7 +6,20 @@
 
 import { getCurrentIdToken } from "./firebase";
 
-let rawBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+let rawBaseUrl = process.env.NEXT_PUBLIC_API_URL;
+// If running in browser on Render production domain and env var was missing or pointed to localhost,
+// automatically target the production FastAPI service.
+if (typeof window !== "undefined") {
+  const hostname = window.location.hostname;
+  if (hostname.includes("onrender.com")) {
+    if (!rawBaseUrl || rawBaseUrl.includes("localhost") || rawBaseUrl === "undefined") {
+      rawBaseUrl = "https://skillpath-api-qmvk.onrender.com";
+    }
+  }
+}
+if (!rawBaseUrl) {
+  rawBaseUrl = "http://localhost:8000";
+}
 if (rawBaseUrl && !rawBaseUrl.startsWith("http://") && !rawBaseUrl.startsWith("https://")) {
   rawBaseUrl = `https://${rawBaseUrl}`;
 }

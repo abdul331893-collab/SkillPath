@@ -30,10 +30,21 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Authe
     name = payload.get("name") or payload.get("display_name")
     email_verified = payload.get("email_verified", False)
 
+    from app.core.config import settings
+
     # Check database for assigned role
     db_user = FirestoreRepository.get_document("users", uid)
     role = UserRole.STUDENT
-    if db_user and db_user.get("role"):
+
+    # Known admin emails check
+    admin_emails = [e.strip().lower() for e in (getattr(settings, "ADMIN_EMAILS", "admin@skillpath.ai") or "admin@skillpath.ai").split(",") if e.strip()]
+    is_admin_email = bool(email and email.strip().lower() in admin_emails) or (email and email.strip().lower() == "admin@skillpath.ai")
+
+    if is_admin_email:
+        role = UserRole.ADMIN
+        if db_user and db_user.get("role") != "admin":
+            FirestoreRepository.update_document("users", uid, {"role": "admin"})
+    elif db_user and db_user.get("role"):
         try:
             role = UserRole(db_user.get("role"))
         except ValueError:

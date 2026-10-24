@@ -165,6 +165,12 @@ async def get_student_assessment_summary(
         "applications": apps
     }
 
+@router.get("/jobs", response_model=List[JobListingResponse])
+async def list_admin_jobs(admin: AuthenticatedUser = Depends(require_admin)):
+    """Administrator endpoint: Lists all active and inactive job opportunities."""
+    jobs = FirestoreRepository.query_documents("jobs", limit=300)
+    return [JobListingResponse(**j) for j in jobs]
+
 @router.post("/jobs", response_model=JobListingResponse)
 async def create_job_listing(job: JobListingCreate, admin: AuthenticatedUser = Depends(require_admin)):
     """Creates a new verified job listing."""

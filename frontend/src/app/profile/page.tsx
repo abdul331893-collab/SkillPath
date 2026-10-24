@@ -106,9 +106,22 @@ export default function ProfilePage() {
       } catch (err: unknown) {
         console.warn("Background profile refresh note:", err);
         if (isSubscribed) {
+          const errObj = err as { status?: number; message?: string };
+          let errorText = "Could not load cloud profile from server.";
+          if (errObj?.status === 401) {
+            errorText = "Authentication session expired or token invalid. Please sign in again.";
+          } else if (errObj?.status === 403) {
+            errorText = "Access forbidden: You are not authorized to view this cloud profile.";
+          } else if (errObj?.status === 404) {
+            errorText = "Profile document was not found in Firestore cloud database.";
+          } else if (errObj?.status === 408) {
+            errorText = "Request timed out while connecting to the profile service.";
+          } else if (errObj?.message) {
+            errorText = `Profile cloud sync note: ${errObj.message}`;
+          }
           setMessage({
             type: "error",
-            text: "Could not load cloud profile. You can still edit and save your information below.",
+            text: errorText,
           });
         }
       } finally {

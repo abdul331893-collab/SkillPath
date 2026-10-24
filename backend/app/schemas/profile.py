@@ -2,8 +2,8 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, EmailStr, Field
 
 class ProjectItem(BaseModel):
-    title: str
-    description: str
+    title: str = ""
+    description: str = ""
     technologies: List[str] = []
     link: Optional[str] = None
 

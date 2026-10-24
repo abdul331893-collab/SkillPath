@@ -41,6 +41,10 @@ async def upload_and_analyze_resume(
     content = await file.read()
 
     # 1. Validation and Text Extraction
+    valid, validation_err = DocumentParser.validate_file(file.filename, content)
+    if not valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=validation_err)
+
     try:
         extracted_text = DocumentParser.extract_text(file.filename, content)
     except DocumentUnsupportedError as e:
@@ -135,15 +139,19 @@ async def get_latest_resume(current_user: AuthenticatedUser = Depends(get_curren
 
     docs.sort(key=lambda item: item.get("created_at") or "", reverse=True)
     d = docs[0]
+    extracted = d.get("extracted_data")
+    if not isinstance(extracted, dict):
+        extracted = {}
+
     return ResumeLatestResponse(
         resume=ResumeUploadResponse(
-            id=d["id"],
-            user_id=d["user_id"],
-            file_name=d["file_name"],
-            file_url=d["file_url"],
-            extracted_data=ResumeExtractedData(**d["extracted_data"]),
+            id=d.get("id") or str(uuid.uuid4()),
+            user_id=d.get("user_id") or current_user.uid,
+            file_name=d.get("file_name") or "resume.pdf",
+            file_url=d.get("file_url") or "",
+            extracted_data=ResumeExtractedData(**extracted),
             recommended_domains=d.get("recommended_domains", []),
-            created_at=d["created_at"]
+            created_at=d.get("created_at") or datetime.now(timezone.utc).isoformat()
         )
     )
 

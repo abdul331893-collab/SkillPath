@@ -25,8 +25,9 @@ class Settings(BaseSettings):
     APP_NAME: str = "SkillPath AI"
     ENVIRONMENT: str = "development"
     PORT: int = 8000
-    FRONTEND_URL: str = "http://localhost:3000"
-    ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    FRONTEND_URL: str = "https://skillpath-a7ca.onrender.com"
+    ALLOWED_ORIGINS: str = "https://skillpath-a7ca.onrender.com,http://localhost:3000,http://127.0.0.1:3000"
+    ADMIN_EMAILS: str = "admin@skillpath.ai"
 
     # Google Gemini
     GEMINI_API_KEY: Optional[str] = None
@@ -51,10 +52,22 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> List[str]:
-        origins = [orig.strip() for orig in self.ALLOWED_ORIGINS.split(",") if orig.strip()]
-        if self.FRONTEND_URL and self.FRONTEND_URL not in origins:
-            origins.append(self.FRONTEND_URL)
-        return origins
+        raw_items = [orig.strip() for orig in self.ALLOWED_ORIGINS.split(",") if orig.strip()]
+        if self.FRONTEND_URL and self.FRONTEND_URL.strip():
+            raw_items.append(self.FRONTEND_URL.strip())
+
+        # Production deployed frontend origin must always be explicitly allowed
+        production_frontend = "https://skillpath-a7ca.onrender.com"
+        if production_frontend not in raw_items:
+            raw_items.append(production_frontend)
+
+        # Sanitize: strip whitespace, quotes, and trailing slashes
+        cleaned: List[str] = []
+        for origin in raw_items:
+            clean = origin.strip().strip('"').strip("'").rstrip("/")
+            if clean and clean not in cleaned:
+                cleaned.append(clean)
+        return cleaned
 
     @property
     def is_dev(self) -> bool:

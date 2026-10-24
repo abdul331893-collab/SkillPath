@@ -245,7 +245,11 @@ class FirestoreRepository:
                 ref = client.collection(collection)
                 if filters:
                     for field, op, val in filters:
-                        ref = ref.where(field, op, val)
+                        try:
+                            from google.cloud.firestore_v1.base_query import FieldFilter
+                            ref = ref.where(filter=FieldFilter(field, op, val))
+                        except Exception:
+                            ref = ref.where(field, op, val)
                 docs = ref.limit(limit).stream()
                 results = []
                 for doc in docs:

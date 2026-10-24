@@ -16,9 +16,9 @@ services:
       - key: PORT
         value: 8000
       - key: FRONTEND_URL
-        sync: false
+        value: https://skillpath-a7ca.onrender.com
       - key: ALLOWED_ORIGINS
-        sync: false
+        value: https://skillpath-a7ca.onrender.com,http://localhost:3000,http://127.0.0.1:3000
       - key: GEMINI_API_KEY
         sync: false
       - key: FIREBASE_PROJECT_ID
