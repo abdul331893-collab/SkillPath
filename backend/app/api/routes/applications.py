@@ -18,6 +18,8 @@ from app.core.logging import logger
 router = APIRouter(prefix="/applications", tags=["Student Applications"])
 
 @router.post("/apply", response_model=ApplicationResponse)
+@router.post("", response_model=ApplicationResponse)
+@router.post("/", response_model=ApplicationResponse)
 async def submit_application(
     req: ApplicationCreate,
     current_user: AuthenticatedUser = Depends(get_current_user)
@@ -108,6 +110,7 @@ async def submit_application(
     return ApplicationResponse(**application_data)
 
 @router.get("/my", response_model=List[ApplicationResponse])
+@router.get("/me", response_model=List[ApplicationResponse])
 async def get_my_applications(current_user: AuthenticatedUser = Depends(get_current_user)):
     """
     Retrieves all applications submitted by the authenticated student.

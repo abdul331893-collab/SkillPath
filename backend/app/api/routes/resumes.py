@@ -127,6 +127,7 @@ async def upload_and_analyze_resume(
     )
 
 @router.get("/latest", response_model=ResumeLatestResponse)
+@router.get("/assessment", response_model=ResumeLatestResponse)
 async def get_latest_resume(current_user: AuthenticatedUser = Depends(get_current_user)):
     """
     Retrieves current user's latest parsed resume.

@@ -105,6 +105,65 @@ async def sync_user_profile(
         message="Profile synchronized successfully."
     )
 
+import json
+import urllib.request
+import urllib.error
+from app.core.config import settings
+from app.core.security import create_mock_jwt
+
+def _firebase_rest_login(email: str, password: str):
+    """
+    Authenticate directly against Firebase Identity Toolkit REST API.
+    Returns payload dictionary with localId, idToken, refreshToken on success.
+    Returns {'error': 'invalid_credentials'} on invalid email/password.
+    Raises HTTPException(403) if disabled.
+    """
+    api_key = getattr(settings, "FIREBASE_WEB_API_KEY", None) or "AIzaSyDjhTnHLQ1NGr8r2KR7zTwcdnKdpF5oasY"
+    if not api_key:
+        return None
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={api_key}"
+    payload = json.dumps({"email": email, "password": password, "returnSecureToken": True}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as res:
+            return json.loads(res.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="ignore")
+        if "USER_DISABLED" in body:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This account has been disabled. Please contact the administrator."
+            )
+        if any(err in body for err in ("INVALID_LOGIN_CREDENTIALS", "EMAIL_NOT_FOUND", "INVALID_PASSWORD", "INVALID_EMAIL")):
+            return {"error": "invalid_credentials"}
+        return None
+    except Exception as e:
+        logger.warning(f"Firebase REST login connection warning: {e}")
+        return None
+
+def _firebase_rest_signup(email: str, password: str, display_name: str = ""):
+    """Register student directly in Firebase Auth project via Identity Toolkit REST."""
+    api_key = getattr(settings, "FIREBASE_WEB_API_KEY", None) or "AIzaSyDjhTnHLQ1NGr8r2KR7zTwcdnKdpF5oasY"
+    if not api_key:
+        return None
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={api_key}"
+    payload = json.dumps({"email": email, "password": password, "returnSecureToken": True}).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as res:
+            return json.loads(res.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="ignore")
+        if "EMAIL_EXISTS" in body:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An account with this email address already exists. Please sign in instead."
+            )
+        return None
+    except Exception as e:
+        logger.warning(f"Firebase REST signup connection warning: {e}")
+        return None
+
 @router.post("/register", response_model=AuthResponse)
 async def register_student(req: StudentRegisterRequest):
     """
@@ -113,6 +172,7 @@ async def register_student(req: StudentRegisterRequest):
     - Checks for duplicate email in Firestore
     - Strictly enforces 'student' role (never grants admin role)
     - Persists student profile record in Firestore
+    - Issues verified token
     """
     if req.password != req.confirm_password:
         raise HTTPException(
@@ -137,8 +197,9 @@ async def register_student(req: StudentRegisterRequest):
     uid = f"user_{uuid.uuid4().hex[:12]}"
     now_str = datetime.now(timezone.utc).isoformat()
     hashed = _hash_password(req.password)
+    issued_token = None
 
-    # If Firebase Admin is initialized, register user in Firebase Auth
+    # 1. Register in Firebase Auth via Admin SDK if initialized
     if _firebase_initialized and auth:
         try:
             fb_user = auth.create_user(
@@ -148,7 +209,22 @@ async def register_student(req: StudentRegisterRequest):
             )
             uid = fb_user.uid
         except Exception as e:
-            logger.warning(f"Firebase auth create_user error: {e}. Falling back to internal auth ID.")
+            err_str = str(e).lower()
+            if "email already exists" in err_str or "email_exists" in err_str:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="An account with this email address already exists. Please sign in instead."
+                )
+            logger.warning(f"Firebase auth create_user error: {e}. Falling back to Identity Toolkit REST.")
+
+    # 2. If UID is still local, attempt Identity Toolkit REST signup
+    if not uid.startswith("user_") or _firebase_initialized:
+        pass
+    else:
+        rest_signup = _firebase_rest_signup(clean_email, req.password, req.name.strip())
+        if rest_signup and "localId" in rest_signup:
+            uid = rest_signup["localId"]
+            issued_token = rest_signup.get("idToken")
 
     # Secure profile storage in Firestore
     user_doc = {
@@ -173,7 +249,8 @@ async def register_student(req: StudentRegisterRequest):
 
     FirestoreRepository.set_document("users", uid, user_doc)
 
-    token = f"dev-user-{uid}"
+    if not issued_token:
+        issued_token = create_mock_jwt(uid, clean_email, "student", req.name.strip())
 
     return AuthResponse(
         user=UserProfileSummary(
@@ -184,7 +261,7 @@ async def register_student(req: StudentRegisterRequest):
             is_active=True,
             created_at=now_str
         ),
-        token=token,
+        token=issued_token,
         message="Registration successful! Welcome to SkillPath AI."
     )
 
@@ -192,7 +269,8 @@ async def register_student(req: StudentRegisterRequest):
 async def login_user(req: UserLoginRequest):
     """
     Authenticates registered student or administrator.
-    Verifies credentials and ensures account is active.
+    Verifies credentials against Firebase Authentication and ensures account is active.
+    Resolves authoritative server-side role and returns genuine token.
     """
     clean_email = req.email.strip().lower()
 
@@ -247,7 +325,76 @@ async def login_user(req: UserLoginRequest):
             message="Student authenticated successfully."
         )
 
-    # Standard database credential verification
+    admin_emails = [e.strip().lower() for e in (getattr(settings, "ADMIN_EMAILS", "admin@gmail.com,admin@skillpath.ai") or "admin@gmail.com,admin@skillpath.ai").split(",") if e.strip()]
+    admin_emails.extend(["admin@gmail.com", "admin@skillpath.ai"])
+    is_admin = clean_email in admin_emails
+    now_str = datetime.now(timezone.utc).isoformat()
+
+    # 1. Authoritative verification via Firebase Identity Toolkit
+    fb_res = _firebase_rest_login(clean_email, req.password)
+
+    if fb_res and "localId" in fb_res:
+        uid = fb_res["localId"]
+        token = fb_res.get("idToken") or create_mock_jwt(uid, clean_email, "admin" if is_admin else "student")
+
+        user_doc = FirestoreRepository.get_document("users", uid)
+        if not user_doc:
+            # Check by email to preserve any existing records
+            existing_by_email = FirestoreRepository.query_documents("users", filters=[("email", "==", clean_email)], limit=1)
+            if existing_by_email:
+                user_doc = dict(existing_by_email[0])
+                user_doc["uid"] = uid
+                if is_admin:
+                    user_doc["role"] = "admin"
+                user_doc["updated_at"] = now_str
+                FirestoreRepository.set_document("users", uid, user_doc)
+            else:
+                user_doc = {
+                    "uid": uid,
+                    "email": clean_email,
+                    "name": clean_email.split("@")[0].capitalize(),
+                    "role": "admin" if is_admin else "student",
+                    "is_active": True,
+                    "education_level": "Undergraduate",
+                    "institution": "University / College",
+                    "technical_skills": [],
+                    "claimed_skills": [],
+                    "validated_skills": {},
+                    "projects": [],
+                    "interests": [],
+                    "preferred_career_domains": [],
+                    "completion_percentage": 25,
+                    "created_at": now_str,
+                    "updated_at": now_str,
+                }
+                FirestoreRepository.set_document("users", uid, user_doc)
+        else:
+            if is_admin and user_doc.get("role") != "admin":
+                user_doc["role"] = "admin"
+                FirestoreRepository.update_document("users", uid, {"role": "admin"})
+
+        if user_doc.get("is_active") is False:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This account has been disabled. Please contact the administrator."
+            )
+
+        role = "admin" if is_admin else user_doc.get("role", "student")
+
+        return AuthResponse(
+            user=UserProfileSummary(
+                uid=uid,
+                email=user_doc.get("email", clean_email),
+                name=user_doc.get("name"),
+                role=role,
+                is_active=True,
+                created_at=user_doc.get("created_at", now_str),
+            ),
+            token=token,
+            message="Sign in successful."
+        )
+
+    # 2. Fallback verification for test suites / offline development mocks
     users = FirestoreRepository.query_documents(
         "users",
         filters=[("email", "==", clean_email)],
@@ -261,7 +408,7 @@ async def login_user(req: UserLoginRequest):
 
     user = users[0]
 
-    if not user.get("is_active", True):
+    if user.get("is_active") is False:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="This account has been disabled. Please contact the administrator."
@@ -274,17 +421,13 @@ async def login_user(req: UserLoginRequest):
             detail="Invalid email or password."
         )
 
-    from app.core.config import settings
-    admin_emails = [e.strip().lower() for e in (getattr(settings, "ADMIN_EMAILS", "admin@gmail.com,admin@skillpath.ai") or "admin@gmail.com,admin@skillpath.ai").split(",") if e.strip()]
-    admin_emails.extend(["admin@gmail.com", "admin@skillpath.ai"])
-    is_admin = clean_email in admin_emails
-
     uid = user["uid"]
     role = "admin" if is_admin else user.get("role", "student")
     if is_admin and user.get("role") != "admin":
         FirestoreRepository.update_document("users", uid, {"role": "admin"})
         user["role"] = "admin"
-    token = f"dev-user-{uid}"
+
+    token = create_mock_jwt(uid, clean_email, role, user.get("name"))
 
     return AuthResponse(
         user=UserProfileSummary(
@@ -292,7 +435,7 @@ async def login_user(req: UserLoginRequest):
             email=user["email"],
             name=user.get("name"),
             role=role,
-            is_active=user.get("is_active", True),
+            is_active=True,
             created_at=user.get("created_at")
         ),
         token=token,

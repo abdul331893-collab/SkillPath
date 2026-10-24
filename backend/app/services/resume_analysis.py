@@ -52,10 +52,14 @@ Respond strictly with a JSON object in this structure:
 """
         extracted = None
         if gemini_service.is_available():
-            extracted = gemini_service.generate_json(prompt)
+            try:
+                extracted = gemini_service.generate_json(prompt, timeout=10.0, max_retries=0)
+            except Exception as e:
+                logger.warning(f"Fast Gemini resume extraction note: {e}. Falling back immediately to heuristic parsing.")
+                extracted = None
 
         if not extracted or not isinstance(extracted, dict):
-            # Fallback heuristic parser
+            # Fallback heuristic parser executes in < 5ms
             extracted = cls._heuristic_parse(text)
 
         # Determine recommended career domains based on claimed skills

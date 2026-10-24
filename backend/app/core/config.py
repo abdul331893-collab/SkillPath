@@ -36,9 +36,10 @@ class Settings(BaseSettings):
 
     # Firebase
     FIREBASE_SERVICE_ACCOUNT_KEY: Optional[str] = None
-    FIREBASE_PROJECT_ID: Optional[str] = None
+    FIREBASE_PROJECT_ID: Optional[str] = "skillpath-c8115"
     FIREBASE_CLIENT_EMAIL: Optional[str] = None
     FIREBASE_PRIVATE_KEY: Optional[str] = None
+    FIREBASE_WEB_API_KEY: Optional[str] = "AIzaSyDjhTnHLQ1NGr8r2KR7zTwcdnKdpF5oasY"
 
     # Cloudinary
     CLOUDINARY_CLOUD_NAME: Optional[str] = None

@@ -120,3 +120,13 @@ async def root():
         "documentation": "/docs",
         "health": f"{api_v1_prefix}/health"
     }
+
+from fastapi import Depends
+from app.api.dependencies import get_current_user
+from app.core.permissions import AuthenticatedUser
+
+@app.get("/api/v1/resume-assessment")
+async def resume_assessment_alias(current_user: AuthenticatedUser = Depends(get_current_user)):
+    from app.api.routes.resumes import get_latest_resume
+    return await get_latest_resume(current_user=current_user)
+

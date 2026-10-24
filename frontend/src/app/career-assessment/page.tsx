@@ -311,6 +311,7 @@ export default function CareerAssessmentPage() {
         method: "POST",
         token: activeAuthToken,
         body: formData,
+        timeoutMs: 60000,
       });
       setResumeData(result);
       populateSkillsAndProjects(result);

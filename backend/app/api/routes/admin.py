@@ -303,3 +303,16 @@ async def get_admin_assessment_detail(
             item["student_email"] = user_doc.get("email") or ""
 
     return item
+
+from app.schemas.application import ApplicationStatusUpdate, ApplicationResponse
+
+@router.patch("/applications/{app_id}/status", response_model=ApplicationResponse)
+async def update_admin_application_status(
+    app_id: str,
+    update: ApplicationStatusUpdate,
+    admin: AuthenticatedUser = Depends(require_admin)
+):
+    """Administrator endpoint: Updates application review status."""
+    from app.api.routes.applications import update_application_status
+    return await update_application_status(app_id=app_id, update=update, admin=admin)
+

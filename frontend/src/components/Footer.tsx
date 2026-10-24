@@ -27,7 +27,7 @@ export const Footer: React.FC = () => {
             <h4 className="font-semibold text-slate-900 mb-3 text-xs uppercase tracking-wider">Platform</h4>
             <ul className="space-y-2 text-xs">
               <li><Link href="/career-assessment" className="hover:text-purple-600 transition">Skill Assessments</Link></li>
-              <li><Link href="/resume-assessment" className="hover:text-purple-600 transition">Resume Analysis</Link></li>
+              <li><Link href="/career-assessment" className="hover:text-purple-600 transition">Resume Analysis</Link></li>
               <li><Link href="/roadmap" className="hover:text-purple-600 transition">Adaptive Roadmaps</Link></li>
               <li><Link href="/career-domains" className="hover:text-purple-600 transition">Career Domains</Link></li>
               <li><Link href="/jobs" className="hover:text-purple-600 transition">Verified Job Matches</Link></li>

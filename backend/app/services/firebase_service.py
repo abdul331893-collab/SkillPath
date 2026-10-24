@@ -39,6 +39,7 @@ class StorageService:
                     resource_type="auto",
                     folder=f"skillpath/{folder}",
                     public_id=f"{uuid.uuid4()}_{filename}",
+                    timeout=10
                 )
                 return result.get("secure_url"), result.get("public_id")
             except Exception as e:
