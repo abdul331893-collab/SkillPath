@@ -241,39 +241,90 @@ class CareerService:
 
         # Retrieve student doc for project and assessment history
         actual_user_id = user_id or ""
-        user_doc = FirestoreRepository.get_document("users", actual_user_id) or {} if actual_user_id else {}
+        user_doc = {}
+        if actual_user_id:
+            user_doc = FirestoreRepository.get_document("users", actual_user_id) or {}
+            if not user_doc:
+                # Fallback to query by email or check existing
+                docs = FirestoreRepository.query_documents("users", filters=[("uid", "==", actual_user_id)], limit=1)
+                if docs:
+                    user_doc = docs[0]
 
         # Confirmed student skills from profile and parsed resume
         confirmed_from_profile = user_doc.get("claimed_skills", []) or user_doc.get("technical_skills", [])
         confirmed_skills_all = list(set((user_confirmed_skills or []) + confirmed_from_profile))
 
-        # Build candidate skill dictionary
+        # Check resumes collection for confirmed skills from uploaded resume
+        if actual_user_id:
+            user_resumes = FirestoreRepository.query_documents("resumes", filters=[("user_id", "==", actual_user_id)], limit=5)
+            if not user_resumes:
+                user_resumes = FirestoreRepository.query_documents("resumes", filters=[("student_id", "==", actual_user_id)], limit=5)
+            for r in user_resumes:
+                for s in (r.get("skills") or []):
+                    if s and str(s).strip():
+                        confirmed_skills_all.append(str(s).strip())
+        confirmed_skills_all = list(set(confirmed_skills_all))
+
+        # Build candidate skill and assessed skill dictionaries
         candidate_skills: Dict[str, float] = {}
+        assessed_skills: Dict[str, float] = {}
         for s in confirmed_skills_all:
             if s and str(s).strip():
-                candidate_skills[str(s).strip()] = 70.0  # Confirmed skill baseline
+                candidate_skills[str(s).strip()] = 60.0  # Self-reported / confirmed baseline
+
+        # Overlay profile validated skills (saved from prior assessment submissions)
+        profile_validated = user_doc.get("validated_skills", {}) if isinstance(user_doc.get("validated_skills"), dict) else {}
+        for s, score in profile_validated.items():
+            if s and str(s).strip():
+                score_val = float(score)
+                candidate_skills[str(s).strip()] = max(candidate_skills.get(str(s).strip(), 0.0), score_val)
+                assessed_skills[str(s).strip()] = max(assessed_skills.get(str(s).strip(), 0.0), score_val)
+
         for s, score in (user_skills or {}).items():
             if s and str(s).strip():
-                candidate_skills[str(s).strip()] = float(score)
+                score_val = float(score)
+                candidate_skills[str(s).strip()] = max(candidate_skills.get(str(s).strip(), 0.0), score_val)
+                assessed_skills[str(s).strip()] = max(assessed_skills.get(str(s).strip(), 0.0), score_val)
 
-        has_sufficient_data = len(candidate_skills) > 0
-
-        # Retrieve completed assessment breakdown evidence
+        # Retrieve completed assessment breakdown evidence from Firestore assessments collection
         assessment_evidence_list: List[str] = []
         if actual_user_id:
-            completed_assessments = FirestoreRepository.query_documents(
+            # Query by user_id first (single filter to avoid composite index requirements)
+            user_assessments = FirestoreRepository.query_documents(
                 "assessments",
-                filters=[("user_id", "==", actual_user_id), ("status", "==", "completed")],
-                limit=5
+                filters=[("user_id", "==", actual_user_id)],
+                limit=50
             )
+            if not user_assessments:
+                user_assessments = FirestoreRepository.query_documents(
+                    "assessments",
+                    filters=[("student_id", "==", actual_user_id)],
+                    limit=50
+                )
+
+            # Filter completed assessments
+            completed_assessments = [
+                a for a in user_assessments
+                if str(a.get("status", "")).lower() == "completed"
+                or (isinstance(a.get("result"), dict) and a.get("result", {}).get("total_score_percentage") is not None)
+                or a.get("total_score_percentage") is not None
+            ]
+
             for a in completed_assessments:
                 res = a.get("result") or a
+                asmt_domain = a.get("domain") or res.get("domain") or "Technical Assessment"
                 for b in res.get("skill_breakdown", []):
                     s_name = b.get("skill")
-                    s_score = b.get("score_percentage", 0)
-                    evidence_text = b.get("evidence")
-                    if s_name and evidence_text:
-                        assessment_evidence_list.append(f"{s_name} ({s_score}%): {evidence_text}")
+                    s_score = float(b.get("score_percentage", 0.0))
+                    evidence_text = b.get("evidence") or b.get("answer_evidence")
+                    if s_name and str(s_name).strip():
+                        clean_name = str(s_name).strip()
+                        candidate_skills[clean_name] = max(candidate_skills.get(clean_name, 0.0), s_score)
+                        assessed_skills[clean_name] = max(assessed_skills.get(clean_name, 0.0), s_score)
+                        if evidence_text:
+                            assessment_evidence_list.append(f"{clean_name} ({int(s_score)}%): {evidence_text}")
+                        else:
+                            assessment_evidence_list.append(f"{clean_name} ({int(s_score)}%): Verified in {asmt_domain}")
 
         # Fetch real job listings from Firestore to attach real opportunities
         all_stored_jobs = FirestoreRepository.query_documents("jobs", limit=100)
@@ -283,12 +334,31 @@ class CareerService:
 
         recommendations = []
 
+        has_sufficient_data = len(candidate_skills) > 0
+
         for domain in domains:
             domain_id = domain.get("id")
             title = domain.get("title", domain_id)
             desc = domain.get("description", "")
             min_edu = domain.get("min_education_level")
             req_skills = domain.get("required_skills", [])
+
+            # Check matching skills for this domain specifically
+            domain_matched_reqs = []
+            domain_assessed_reqs = []
+            for req in req_skills:
+                skill_name = req.get("skill")
+                is_matched, cand_name, cand_score = SkillNormalizer.match_skill_against_collection(
+                    skill_name, candidate_skills
+                )
+                if is_matched:
+                    domain_matched_reqs.append((req, cand_name, cand_score))
+
+                is_assessed, _, asmt_score = SkillNormalizer.match_skill_against_collection(
+                    skill_name, assessed_skills
+                )
+                if is_assessed:
+                    domain_assessed_reqs.append((req, asmt_score))
 
             # 1. Eligibility Check (Separate from match score)
             eligibility_met = True
@@ -301,9 +371,10 @@ class CareerService:
                     eligibility_met = False
                     eligibility_notes.append(f"Minimum required education is {min_edu}; currently registered as {user_education}.")
 
-            # 2. Insufficient Data Handling
+            # 2. Insufficient Data Handling:
+            # If candidate has no skills or assessment history, mark insufficient_data = True
+            # and NEVER mark technically eligible.
             if not has_sufficient_data:
-                # Find matching real job listings
                 matching_jobs = []
                 for j in all_stored_jobs:
                     if title.lower() in j.get("domain", "").lower() or domain_id.lower() in j.get("domain", "").lower():
@@ -314,13 +385,17 @@ class CareerService:
                         except Exception:
                             continue
 
+                # Never mark eligible when evidence is missing
+                eligibility_met = False
+                eligibility_notes.append("Technical assessment required to evaluate prerequisite readiness.")
+
                 recommendations.append(CareerRecommendationResponse(
                     domain_id=domain_id,
                     title=title,
                     description=desc,
                     match_score=None,
                     insufficient_data=True,
-                    eligibility_met=eligibility_met,
+                    eligibility_met=False,
                     eligibility_notes="; ".join(eligibility_notes) if eligibility_notes else None,
                     matching_skills=[],
                     strong_supporting_skills=[],
@@ -431,24 +506,49 @@ class CareerService:
                     f"Recommended to complete foundational coursework and skill assessments in {', '.join(missing_required[:2]) or 'core prerequisites'}."
                 )
 
-            # Why is this career domain suitable?
-            if calculated_match_score >= 65.0:
-                why_suitable = (
-                    f"Why is {title} suitable for you? You have verified technical proficiency in "
-                    f"{', '.join(strong_supporting[:3]) or 'core foundational principles'} "
-                    f"yielding a calculated {calculated_match_score}% domain readiness score. "
-                    f"{('Project evidence from ' + relevant_project_evidence[0] + ' reinforces practical readiness.') if relevant_project_evidence else 'Your technical evaluation demonstrates strong alignment with professional engineering expectations.'}"
-                )
-            elif calculated_match_score >= 35.0:
-                why_suitable = (
-                    f"Why is {title} suitable for you? You possess foundational competencies in "
-                    f"{', '.join(strong_supporting[:2]) or 'introductory requirements'} ({calculated_match_score}% match). "
-                    f"With targeted gap remediation in {', '.join(weak_or_missing[:2])}, this domain represents a viable, high-growth path."
-                )
+            # Technical eligibility check:
+            # Do not mark a domain technically eligible merely because the student self-reported or claimed a skill.
+            if len(domain_assessed_reqs) == 0:
+                eligibility_met = False
+                eligibility_notes.append("Self-reported skill claim: Technical assessment in Step 3 is required to confirm prerequisite readiness.")
+            elif calculated_match_score < 35.0:
+                eligibility_met = False
+                eligibility_notes.append(f"Technical readiness score ({calculated_match_score}%) is below the minimum entry benchmark of 35% for this domain.")
+
+            # Filter domain-relevant assessment evidence
+            domain_skills_lower = [r.get("skill", "").lower() for r in req_skills]
+            domain_asmt_evidence = [
+                ev for ev in assessment_evidence_list
+                if any(sk in ev.lower() for sk in domain_skills_lower)
+            ]
+            if not domain_asmt_evidence:
+                domain_asmt_evidence = assessment_evidence_list[:3]
+
+            # Why is this career domain suitable? Grounded in actual candidate assessment data
+            if len(domain_assessed_reqs) > 0:
+                top_assessed_skills = [s["skill"] for s in matching_skills if s["score"] >= 60.0] or [matching_skills[0]["skill"]]
+                if calculated_match_score >= 65.0:
+                    why_suitable = (
+                        f"Why is {title} recommended? Based on your verified technical assessment, you demonstrated strong proficiency in "
+                        f"{', '.join(top_assessed_skills[:3])} yielding a deterministic {calculated_match_score}% domain readiness score. "
+                        f"{('Project evidence from ' + relevant_project_evidence[0] + ' reinforces practical readiness.') if relevant_project_evidence else 'Assessed competencies demonstrate strong alignment with industry benchmarks.'}"
+                    )
+                elif calculated_match_score >= 35.0:
+                    why_suitable = (
+                        f"Why is {title} recommended? You possess assessed competencies in "
+                        f"{', '.join(top_assessed_skills[:2])} ({calculated_match_score}% match). "
+                        f"With prioritized gap remediation in {', '.join(weak_or_missing[:2])}, this domain represents a viable, high-growth path."
+                    )
+                else:
+                    why_suitable = (
+                        f"Why is {title} recommended? This domain is an exploratory pathway ({calculated_match_score}% current match). "
+                        f"Additional skill assessments in {', '.join(missing_required[:2]) or 'core prerequisites'} are recommended before targeting professional vacancies."
+                    )
             else:
                 why_suitable = (
-                    f"Why is {title} suitable for you? This domain is an exploratory pathway ({calculated_match_score}% current match). "
-                    f"Additional skill assessments in {', '.join(missing_required[:2]) or 'core prerequisites'} are recommended before targeting professional vacancies."
+                    f"Why is {title} recommended? You have self-reported preliminary skills in "
+                    f"{', '.join([s['skill'] for s in matching_skills[:2]])} ({calculated_match_score}% preliminary score). "
+                    f"Complete the Step 3 assessment to validate your technical readiness and calibrate your roadmap."
                 )
 
             # Suggested next steps
@@ -489,7 +589,7 @@ class CareerService:
                 matching_skills=matching_skills,
                 strong_supporting_skills=strong_supporting,
                 relevant_project_evidence=relevant_project_evidence,
-                assessment_evidence=assessment_evidence_list[:3],
+                assessment_evidence=domain_asmt_evidence,
                 weak_or_missing_skills=weak_or_missing,
                 skill_gaps=skill_gaps,
                 missing_required_skills=missing_required,
@@ -513,7 +613,8 @@ class CareerService:
         )
 
         # 5. Populate comparative analysis for all recommendations when sufficient data exists
-        if has_sufficient_data and len(recommendations) >= 2:
+        has_any_sufficient = any(not r.insufficient_data for r in recommendations)
+        if has_any_sufficient and len(recommendations) >= 2:
             top_rec = recommendations[0]
             top_title = top_rec.title
             top_score = top_rec.match_score or 0.0

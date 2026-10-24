@@ -14,6 +14,8 @@ class ProfileBase(BaseModel):
     institution: Optional[str] = None
     graduation_year: Optional[int] = None
     technical_skills: List[str] = []
+    claimed_skills: List[str] = []
+    validated_skills: Dict[str, float] = {}
     projects: List[ProjectItem] = []
     interests: List[str] = []
     preferred_career_domains: List[str] = []

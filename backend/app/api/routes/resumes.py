@@ -135,6 +135,8 @@ async def get_latest_resume(current_user: AuthenticatedUser = Depends(get_curren
     """
     docs = FirestoreRepository.query_documents("resumes", filters=[("user_id", "==", current_user.uid)], limit=50)
     if not docs:
+        docs = FirestoreRepository.query_documents("resumes", filters=[("student_id", "==", current_user.uid)], limit=50)
+    if not docs:
         return ResumeLatestResponse(resume=None)
 
     docs.sort(key=lambda item: item.get("created_at") or "", reverse=True)

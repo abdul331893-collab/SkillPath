@@ -52,8 +52,8 @@ async def sync_user_profile(
             filters=[("email", "==", clean_email)],
             limit=1
         )
-        if existing_with_email and existing_with_email[0].get("uid") != uid:
-            doc = existing_with_email[0]
+        if existing_with_email:
+            doc = dict(existing_with_email[0])
             doc["uid"] = uid
             if is_admin:
                 doc["role"] = "admin"

@@ -28,6 +28,21 @@ async def get_my_profile(current_user: AuthenticatedUser = Depends(get_current_u
     """Retrieves current student's profile."""
     doc = FirestoreRepository.get_document("users", current_user.uid)
     if not doc:
+        # Check if an existing profile exists with this email
+        clean_email = (current_user.email or "").strip().lower()
+        if clean_email:
+            existing = FirestoreRepository.query_documents(
+                "users",
+                filters=[("email", "==", clean_email)],
+                limit=1
+            )
+            if existing:
+                doc = dict(existing[0])
+                doc["uid"] = current_user.uid
+                doc["updated_at"] = datetime.now(timezone.utc).isoformat()
+                FirestoreRepository.set_document("users", current_user.uid, doc)
+
+    if not doc:
         # Create empty profile baseline
         now_str = datetime.now(timezone.utc).isoformat()
         doc = {

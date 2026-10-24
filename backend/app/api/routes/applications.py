@@ -38,11 +38,18 @@ async def submit_application(
         )
 
     # Prevent duplicate applications
-    existing_apps = FirestoreRepository.query_documents(
+    student_apps = FirestoreRepository.query_documents(
         "applications",
-        filters=[("student_id", "==", current_user.uid), ("job_id", "==", req.job_id)],
+        filters=[("student_id", "==", current_user.uid)],
         limit=100
     )
+    if not student_apps:
+        student_apps = FirestoreRepository.query_documents(
+            "applications",
+            filters=[("user_id", "==", current_user.uid)],
+            limit=100
+        )
+    existing_apps = [a for a in student_apps if a.get("job_id") == req.job_id]
     active_existing = [a for a in existing_apps if a.get("status") != ApplicationStatus.WITHDRAWN.value]
     if active_existing:
         raise HTTPException(
@@ -111,6 +118,12 @@ async def get_my_applications(current_user: AuthenticatedUser = Depends(get_curr
         filters=[("student_id", "==", current_user.uid)],
         limit=100
     )
+    if not apps:
+        apps = FirestoreRepository.query_documents(
+            "applications",
+            filters=[("user_id", "==", current_user.uid)],
+            limit=100
+        )
 
     # Sort descending by submission date
     apps.sort(key=lambda x: x.get("submission_date", ""), reverse=True)
