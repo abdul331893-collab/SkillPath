@@ -2167,77 +2167,32 @@ export default function CareerAssessmentPage() {
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="text-lg font-bold text-slate-900">{rec.title}</h3>
-                          {rec.insufficient_data ? (
-                            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
-                              <AlertCircle className="w-3 h-3" />
-                              Assessment Required
-                            </span>
-                          ) : (
-                            <span
-                              className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
-                                rec.eligibility_met
-                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                  : "bg-rose-50 text-rose-700 border border-rose-200"
-                              }`}
-                            >
-                              {rec.eligibility_met ? "Eligible" : "Prerequisites Unmet"}
-                            </span>
-                          )}
+                          <span
+                            className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                              rec.eligibility_met
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                : "bg-rose-50 text-rose-700 border border-rose-200"
+                            }`}
+                          >
+                            {rec.eligibility_met ? "Eligible" : "Prerequisites Unmet"}
+                          </span>
                         </div>
                         <p className="text-xs text-slate-600 mt-1">{rec.description}</p>
                       </div>
 
                       <div className="text-right flex-shrink-0">
-                        {rec.insufficient_data ? (
-                          <div className="flex flex-col items-end">
-                            <span className="text-sm font-bold text-amber-600 bg-amber-50 px-3 py-1 rounded-lg border border-amber-200">
-                              Data Insufficient
-                            </span>
-                            <span className="text-[10px] text-slate-400 mt-1">Requires Assessment</span>
-                          </div>
-                        ) : (
-                          <div>
-                            <div className="text-3xl font-extrabold text-purple-600">
-                              {rec.match_score !== null && rec.match_score !== undefined
-                                ? `${rec.match_score}%`
-                                : "N/A"}
-                            </div>
-                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                              Deterministic Match Score
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Insufficient data callout with working direct action */}
-                    {rec.insufficient_data && (
-                      <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
-                        <span className="font-bold flex items-center gap-1.5">
-                          <AlertCircle className="w-4 h-4 text-amber-600" />
-                          Prerequisite Skill Evidence Missing
-                        </span>
-                        <p className="text-[11px] leading-relaxed">
-                          We do not generate arbitrary match percentages without verified student evidence. Complete your technical assessment in Step 3 or confirm your project skills in Step 2 to generate an evidence-backed score.
-                        </p>
                         <div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setTargetDomain(rec.title);
-                              setCurrentStep(3);
-                              if (typeof window !== "undefined") {
-                                window.scrollTo({ top: 0, behavior: "smooth" });
-                              }
-                            }}
-                            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-semibold text-xs transition inline-flex items-center gap-1.5 shadow-xs"
-                          >
-                            <span>Take Assessment for {rec.title}</span>
-                            <ArrowRight className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="text-3xl font-extrabold text-purple-600">
+                            {rec.match_score !== null && rec.match_score !== undefined
+                              ? `${rec.match_score}%`
+                              : "0%"}
+                          </div>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                            Deterministic Match Score
+                          </span>
                         </div>
                       </div>
-                    )}
+                    </div>
 
                     {/* Explaining: "Why is this career domain suitable for me?" */}
                     <div className="p-3.5 rounded-xl bg-purple-50/60 border border-purple-100 text-xs space-y-1 text-slate-800">

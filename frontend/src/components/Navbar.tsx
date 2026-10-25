@@ -26,7 +26,10 @@ export const Navbar: React.FC = () => {
 
   React.useEffect(() => {
     setMounted(true);
-  }, []);
+    if (typeof window !== "undefined" && pathname && pathname !== "/" && pathname !== "/login" && pathname !== "/register") {
+      localStorage.setItem("skillpath_last_route", pathname);
+    }
+  }, [pathname]);
 
   // Guarantee matching SSR and initial hydration
   const isAuthenticated = mounted && !loading && Boolean(user);

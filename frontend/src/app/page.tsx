@@ -1,7 +1,11 @@
-import React from "react";
+"use client";
+
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
+import { useAuth } from "@/lib/auth-context";
 import {
   Compass,
   CheckCircle2,
@@ -18,6 +22,60 @@ import {
 } from "lucide-react";
 
 export default function LandingPage() {
+  const router = useRouter();
+  const { user, loading } = useAuth();
+  const [redirecting, setRedirecting] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const explicitLogout = sessionStorage.getItem("skillpath_explicit_logout");
+    if (explicitLogout === "true") return;
+
+    const savedUserStr = localStorage.getItem("skillpath_user") || localStorage.getItem("skillpath_last_account");
+    if (savedUserStr) {
+      try {
+        const parsed = JSON.parse(savedUserStr);
+        if (parsed?.uid) {
+          setRedirecting(true);
+          const lastRoute = localStorage.getItem("skillpath_last_route");
+          if (lastRoute && lastRoute !== "/" && lastRoute !== "/login" && lastRoute !== "/register") {
+            router.replace(lastRoute);
+            return;
+          }
+          if (parsed.role === "admin") {
+            router.replace("/admin");
+          } else {
+            router.replace("/career-assessment");
+          }
+          return;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!loading && user) {
+      setRedirecting(true);
+      const lastRoute = localStorage.getItem("skillpath_last_route");
+      if (lastRoute && lastRoute !== "/" && lastRoute !== "/login" && lastRoute !== "/register") {
+        router.replace(lastRoute);
+      } else if (user.role === "admin") {
+        router.replace("/admin");
+      } else {
+        router.replace("/career-assessment");
+      }
+    }
+  }, [user, loading, router]);
+
+  if (redirecting) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mb-4" />
+        <p className="text-xs font-semibold text-slate-500">Opening your SkillPath account...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-white text-slate-900">
       <Navbar />

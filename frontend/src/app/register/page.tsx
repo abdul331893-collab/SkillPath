@@ -10,13 +10,23 @@ import { Compass, ArrowRight, AlertCircle, CheckCircle2 } from "lucide-react";
 
 export default function RegisterPage() {
   const router = useRouter();
-  const { register } = useAuth();
+  const { user, loading: authLoading, register } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!authLoading && user) {
+      if (user.role === "admin") {
+        router.replace("/admin");
+      } else {
+        router.replace("/career-assessment");
+      }
+    }
+  }, [user, authLoading, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

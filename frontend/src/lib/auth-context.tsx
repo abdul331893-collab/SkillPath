@@ -54,6 +54,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const hasValidatedRef = useRef<boolean>(false);
   const syncInFlightRef = useRef<Map<string, Promise<User | null>>>(new Map());
 
+  // Synchronously restore previous login account immediately on mount
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const explicitLogout = sessionStorage.getItem("skillpath_explicit_logout");
+      if (explicitLogout === "true") return;
+
+      const savedUserStr = localStorage.getItem("skillpath_user") || localStorage.getItem("skillpath_last_account");
+      const savedToken = localStorage.getItem("skillpath_token");
+      if (savedUserStr) {
+        const parsed = JSON.parse(savedUserStr);
+        if (parsed && parsed.uid) {
+          const effectiveToken = savedToken || (parsed.role === "admin" ? "demo-admin-token" : "demo-student-token");
+          setUser(parsed);
+          setToken(effectiveToken);
+          setLoading(false);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Syncs authenticated Firebase user with authoritative backend Firestore profile
   const syncBackendProfile = useCallback(async (authToken: string, fbUser?: FirebaseUser | null): Promise<User | null> => {
     const cacheKey = `${fbUser?.uid || "anon"}_${authToken.slice(-20)}`;
@@ -107,9 +130,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (!isSubscribed) return;
               setToken(freshToken);
               localStorage.setItem("skillpath_token", freshToken);
+              sessionStorage.removeItem("skillpath_explicit_logout");
 
               // Immediately check cached user for matching UID to eliminate skeleton delay
-              const cachedUserStr = localStorage.getItem("skillpath_user");
+              const cachedUserStr = localStorage.getItem("skillpath_user") || localStorage.getItem("skillpath_last_account");
               let hadMatchingCache = false;
               if (cachedUserStr) {
                 try {
@@ -128,6 +152,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               if (profile && isSubscribed) {
                 setUser(profile);
                 localStorage.setItem("skillpath_user", JSON.stringify(profile));
+                localStorage.setItem("skillpath_last_account", JSON.stringify(profile));
               } else if (!hadMatchingCache && isSubscribed) {
                 // Synthesize provisional profile if backend unreachable
                 const provisional: User = {
@@ -139,36 +164,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 };
                 setUser(provisional);
                 localStorage.setItem("skillpath_user", JSON.stringify(provisional));
+                localStorage.setItem("skillpath_last_account", JSON.stringify(provisional));
               }
             } catch (err) {
               console.warn("[Auth] Token refresh error:", err);
             }
           } else {
             // No active Firebase Auth client session: restore persisted session from localStorage
-            const savedToken = localStorage.getItem("skillpath_token");
-            const savedUser = localStorage.getItem("skillpath_user");
-            if (savedToken && savedUser) {
-              try {
-                const parsed = JSON.parse(savedUser);
-                if (isSubscribed) {
-                  setToken(savedToken);
-                  setUser(parsed);
-                }
-              } catch {
-                if (isSubscribed) {
-                  setUser(null);
-                  setToken(null);
-                }
-                localStorage.removeItem("skillpath_token");
-                localStorage.removeItem("skillpath_user");
-              }
-            } else {
+            const explicitLogout = sessionStorage.getItem("skillpath_explicit_logout");
+            if (explicitLogout === "true") {
               if (isSubscribed) {
                 setUser(null);
                 setToken(null);
               }
-              localStorage.removeItem("skillpath_token");
-              localStorage.removeItem("skillpath_user");
+            } else {
+              const savedToken = localStorage.getItem("skillpath_token");
+              const savedUser = localStorage.getItem("skillpath_user");
+              const savedLastAccount = localStorage.getItem("skillpath_last_account");
+              const rawUser = savedUser || savedLastAccount;
+              if (rawUser) {
+                try {
+                  const parsed = JSON.parse(rawUser);
+                  if (parsed && parsed.uid && isSubscribed) {
+                    const effectiveToken = savedToken || (parsed.role === "admin" ? "demo-admin-token" : "demo-student-token");
+                    setUser(parsed);
+                    setToken(effectiveToken);
+                    localStorage.setItem("skillpath_user", JSON.stringify(parsed));
+                    localStorage.setItem("skillpath_last_account", JSON.stringify(parsed));
+                    localStorage.setItem("skillpath_token", effectiveToken);
+                  }
+                } catch {
+                  // ignore
+                }
+              }
             }
           }
           if (isSubscribed) {
@@ -177,51 +205,68 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       } else {
         // Fallback for offline or local dev without Firebase client
-        const savedToken = localStorage.getItem("skillpath_token");
-        const savedUser = localStorage.getItem("skillpath_user");
+        const explicitLogout = sessionStorage.getItem("skillpath_explicit_logout");
+        if (explicitLogout === "true") {
+          if (isSubscribed) {
+            setUser(null);
+            setToken(null);
+            setLoading(false);
+          }
+        } else {
+          const savedToken = localStorage.getItem("skillpath_token");
+          const savedUser = localStorage.getItem("skillpath_user");
+          const savedLastAccount = localStorage.getItem("skillpath_last_account");
+          const rawUser = savedUser || savedLastAccount;
 
-        if (savedToken && savedUser) {
-          try {
-            const parsed = JSON.parse(savedUser);
-            if (isSubscribed) {
-              setToken(savedToken);
-              setUser(parsed);
-              setLoading(false);
-            }
+          if (rawUser) {
+            try {
+              const parsed = JSON.parse(rawUser);
+              if (parsed && parsed.uid && isSubscribed) {
+                const effectiveToken = savedToken || (parsed.role === "admin" ? "demo-admin-token" : "demo-student-token");
+                setToken(effectiveToken);
+                setUser(parsed);
+                localStorage.setItem("skillpath_user", JSON.stringify(parsed));
+                localStorage.setItem("skillpath_last_account", JSON.stringify(parsed));
+                localStorage.setItem("skillpath_token", effectiveToken);
+                setLoading(false);
+              }
 
-            // Validate in background once (guarded against React Strict Mode duplicate invocations)
-            if (!hasValidatedRef.current) {
-              hasValidatedRef.current = true;
-              apiRequest<User>("/auth/me", { token: savedToken, silent: true })
-                .then((validUser) => {
-                  if (validUser && isSubscribed) {
-                    setUser(validUser);
-                    localStorage.setItem("skillpath_user", JSON.stringify(validUser));
-                  }
-                })
-                .catch((err: unknown) => {
-                  // Only clear session if explicitly rejected as 401 Unauthorized
-                  const status = (err as { status?: number })?.status;
-                  if (status === 401 && isSubscribed) {
-                    setUser(null);
-                    setToken(null);
-                    localStorage.removeItem("skillpath_token");
-                    localStorage.removeItem("skillpath_user");
-                  }
-                });
+              // Validate in background once (guarded against React Strict Mode duplicate invocations)
+              if (!hasValidatedRef.current && savedToken) {
+                hasValidatedRef.current = true;
+                apiRequest<User>("/auth/me", { token: savedToken, silent: true })
+                  .then((validUser) => {
+                    if (validUser && isSubscribed) {
+                      setUser(validUser);
+                      localStorage.setItem("skillpath_user", JSON.stringify(validUser));
+                      localStorage.setItem("skillpath_last_account", JSON.stringify(validUser));
+                    }
+                  })
+                  .catch((err: unknown) => {
+                    // Only clear session if explicitly rejected as 401 Unauthorized
+                    const status = (err as { status?: number })?.status;
+                    if (status === 401 && isSubscribed) {
+                      setUser(null);
+                      setToken(null);
+                      localStorage.removeItem("skillpath_token");
+                      localStorage.removeItem("skillpath_user");
+                      localStorage.removeItem("skillpath_last_account");
+                    }
+                  });
+              }
+            } catch {
+              if (isSubscribed) {
+                setUser(null);
+                setToken(null);
+                setLoading(false);
+              }
             }
-          } catch {
+          } else {
             if (isSubscribed) {
               setUser(null);
               setToken(null);
               setLoading(false);
             }
-          }
-        } else {
-          if (isSubscribed) {
-            setUser(null);
-            setToken(null);
-            setLoading(false);
           }
         }
       }
@@ -265,6 +310,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, password?: string, asAdmin?: boolean): Promise<User | null> => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPassword = password || "";
+    sessionStorage.removeItem("skillpath_explicit_logout");
 
     // 1. Authenticate through Firebase Authentication client when available
     if (isFirebaseConfigured() && firebaseAuth) {
@@ -283,6 +329,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setToken(null);
             localStorage.removeItem("skillpath_token");
             localStorage.removeItem("skillpath_user");
+            localStorage.removeItem("skillpath_last_account");
             throw new Error("This account has been disabled. Please contact the administrator.");
           }
           if (cleanEmail === "admin@gmail.com" || cleanEmail === "admin@skillpath.ai") {
@@ -290,6 +337,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           setUser(profile);
           localStorage.setItem("skillpath_user", JSON.stringify(profile));
+          localStorage.setItem("skillpath_last_account", JSON.stringify(profile));
           return profile;
         }
 
@@ -306,6 +354,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
         setUser(provisionalUser);
         localStorage.setItem("skillpath_user", JSON.stringify(provisionalUser));
+        localStorage.setItem("skillpath_last_account", JSON.stringify(provisionalUser));
         return provisionalUser;
       } catch (fbErr: unknown) {
         const error = fbErr as { code?: string; message?: string };
@@ -337,6 +386,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(res.token);
     localStorage.setItem("skillpath_token", res.token);
     localStorage.setItem("skillpath_user", JSON.stringify(res.user));
+    localStorage.setItem("skillpath_last_account", JSON.stringify(res.user));
     return res.user;
   };
 
@@ -345,6 +395,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const cleanEmail = email.trim().toLowerCase();
     const pwd = password || "password123";
     const cpwd = confirmPassword || pwd;
+    sessionStorage.removeItem("skillpath_explicit_logout");
 
     if (pwd !== cpwd) {
       throw new Error("Password and confirmation password do not match.");
@@ -373,6 +424,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setUser(syncRes.user);
         localStorage.setItem("skillpath_user", JSON.stringify(syncRes.user));
+        localStorage.setItem("skillpath_last_account", JSON.stringify(syncRes.user));
         return;
       } catch (fbErr: unknown) {
         const error = fbErr as { code?: string; message?: string };
@@ -402,9 +454,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(res.token);
     localStorage.setItem("skillpath_token", res.token);
     localStorage.setItem("skillpath_user", JSON.stringify(res.user));
+    localStorage.setItem("skillpath_last_account", JSON.stringify(res.user));
   };
 
   const logout = async () => {
+    sessionStorage.setItem("skillpath_explicit_logout", "true");
     if (isFirebaseConfigured() && firebaseAuth) {
       try {
         await signOut(firebaseAuth);
@@ -416,9 +470,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(null);
     localStorage.removeItem("skillpath_token");
     localStorage.removeItem("skillpath_user");
+    localStorage.removeItem("skillpath_last_account");
+    localStorage.removeItem("skillpath_last_route");
   };
 
   const switchRole = (newRole: "student" | "admin") => {
+    sessionStorage.removeItem("skillpath_explicit_logout");
     const updatedUser: User = {
       uid: newRole === "admin" ? "admin-demo-user-1" : "student-demo-user-1",
       email: newRole === "admin" ? "admin@skillpath.ai" : "student@skillpath.ai",
@@ -432,6 +489,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setToken(newToken);
     localStorage.setItem("skillpath_token", newToken);
     localStorage.setItem("skillpath_user", JSON.stringify(updatedUser));
+    localStorage.setItem("skillpath_last_account", JSON.stringify(updatedUser));
   };
 
   return (
