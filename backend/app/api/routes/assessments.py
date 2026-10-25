@@ -102,9 +102,37 @@ async def get_assessment_history(current_user: AuthenticatedUser = Depends(get_c
     ]
     results = []
     for a in completed_attempts:
-        res_data = a.get("result") or a
-        if "total_score_percentage" in res_data:
+        raw_res = a.get("result") if isinstance(a.get("result"), dict) else a
+        if not isinstance(raw_res, dict):
+            continue
+        pct = raw_res.get("total_score_percentage")
+        if pct is None:
+            continue
+        res_data = dict(raw_res)
+        if not res_data.get("attempt_id"):
+            res_data["attempt_id"] = a.get("id") or a.get("attempt_id") or f"attempt_{len(results)}"
+        if not res_data.get("user_id"):
+            res_data["user_id"] = current_user.uid
+        if not res_data.get("domain"):
+            res_data["domain"] = a.get("domain", "General")
+        if not res_data.get("submitted_at"):
+            res_data["submitted_at"] = a.get("completed_at") or a.get("created_at") or ""
+        if "question_evaluations" not in res_data:
+            res_data["question_evaluations"] = []
+        if "overall_feedback" not in res_data:
+            res_data["overall_feedback"] = ""
+        if "recommended_next_steps" not in res_data:
+            res_data["recommended_next_steps"] = []
+        if "skill_breakdown" not in res_data:
+            res_data["skill_breakdown"] = []
+        if "total_earned_points" not in res_data:
+            res_data["total_earned_points"] = float(pct)
+        if "total_available_points" not in res_data:
+            res_data["total_available_points"] = 100.0
+        try:
             results.append(AssessmentResultResponse(**res_data))
+        except Exception:
+            pass
     return results
 
 @router.get("/latest", response_model=Optional[AssessmentResultResponse])
