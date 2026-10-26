@@ -85,6 +85,7 @@ async def submit_application(
     application_data = {
         "id": app_id,
         "student_id": current_user.uid,
+        "user_id": current_user.uid,
         "student_name": student_name,
         "student_email": current_user.email,
         "job_id": req.job_id,
@@ -114,22 +115,57 @@ async def submit_application(
 async def get_my_applications(current_user: AuthenticatedUser = Depends(get_current_user)):
     """
     Retrieves all applications submitted by the authenticated student.
+    Queries by verified Firebase UID (student_id and user_id) as well as student_email.
+    Repairs legacy or inconsistent records to maintain single source of truth with Admin Console.
     Internal administrator notes are strictly masked to preserve confidentiality.
     """
-    apps = FirestoreRepository.query_documents(
+    found_map: dict = {}
+
+    # 1. Query by student_id == current_user.uid
+    by_student_id = FirestoreRepository.query_documents(
         "applications",
         filters=[("student_id", "==", current_user.uid)],
-        limit=100
+        limit=200
     )
-    if not apps:
-        apps = FirestoreRepository.query_documents(
+    for a in by_student_id:
+        found_map[a.get("id")] = a
+
+    # 2. Query by user_id == current_user.uid
+    by_user_id = FirestoreRepository.query_documents(
+        "applications",
+        filters=[("user_id", "==", current_user.uid)],
+        limit=200
+    )
+    for a in by_user_id:
+        found_map[a.get("id")] = a
+
+    # 3. Query by student_email if available (repairs any accounts created prior to token sync)
+    clean_email = (current_user.email or "").strip().lower()
+    if clean_email:
+        by_email = FirestoreRepository.query_documents(
             "applications",
-            filters=[("user_id", "==", current_user.uid)],
-            limit=100
+            filters=[("student_email", "==", clean_email)],
+            limit=200
         )
+        for a in by_email:
+            aid = a.get("id")
+            if aid:
+                if aid not in found_map:
+                    found_map[aid] = a
+                # Repair ownership link in Firestore so subsequent queries are instant
+                if a.get("student_id") != current_user.uid or a.get("user_id") != current_user.uid:
+                    FirestoreRepository.update_document("applications", aid, {
+                        "student_id": current_user.uid,
+                        "user_id": current_user.uid,
+                    })
+
+    apps = list(found_map.values())
+
+    # Exclude archived/deleted records from student view
+    apps = [a for a in apps if not a.get("is_deleted", False) and a.get("status") != "Archived"]
 
     # Sort descending by submission date
-    apps.sort(key=lambda x: x.get("submission_date", ""), reverse=True)
+    apps.sort(key=lambda x: x.get("submission_date") or x.get("created_at") or "", reverse=True)
 
     results = []
     for a in apps:

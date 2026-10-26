@@ -69,11 +69,14 @@ async def update_my_profile(
     current_user: AuthenticatedUser = Depends(get_current_user)
 ):
     """Updates candidate profile details."""
-    doc = FirestoreRepository.get_document("users", current_user.uid) or {
-        "uid": current_user.uid,
-        "email": current_user.email,
-        "role": current_user.role.value
-    }
+    doc = FirestoreRepository.get_document("users", current_user.uid) or {}
+    doc["uid"] = current_user.uid
+    if not doc.get("email"):
+        doc["email"] = current_user.email or f"{current_user.uid}@example.com"
+    if not doc.get("name"):
+        doc["name"] = current_user.name or doc["email"].split("@")[0].capitalize()
+    if not doc.get("role"):
+        doc["role"] = current_user.role.value
 
     update_dict = updates.model_dump(exclude_unset=True)
     doc.update(update_dict)

@@ -64,6 +64,14 @@ async def upload_and_analyze_resume(
             detail=f"Could not parse document: {str(e)}"
         )
 
+    # Validate file size (max 10MB)
+    MAX_FILE_SIZE = 10 * 1024 * 1024
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File exceeds maximum allowed size of {MAX_FILE_SIZE // (1024 * 1024)}MB."
+        )
+
     # 2. Structured Resume Analysis
     try:
         analysis_result = ResumeAnalysisService.analyze_resume(extracted_text)
@@ -76,14 +84,18 @@ async def upload_and_analyze_resume(
             detail="Failed to analyze extracted resume content."
         )
 
-    # 3. Storage Upload (Cloudinary / local fallback)
+    # 3. Storage Upload via Cloudinary
     try:
-        file_url, public_id = storage_service.upload_file(content, file.filename, folder="resumes")
+        upload_meta = storage_service.upload_file(content, file.filename, folder="resumes")
+        file_url = upload_meta["file_url"]
+        public_id = upload_meta["public_id"]
+        file_type = upload_meta.get("format") or file.filename.split(".")[-1].lower()
+        file_size = upload_meta.get("file_size", len(content))
     except Exception as e:
         logger.error(f"Storage upload failed: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to store uploaded resume file."
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to store uploaded resume in Cloudinary: {str(e)}"
         )
 
     # 4. Persistence to Firestore
@@ -93,16 +105,24 @@ async def upload_and_analyze_resume(
     doc = {
         "id": resume_id,
         "user_id": current_user.uid,
+        "student_id": current_user.uid,
+        "owner_uid": current_user.uid,
         "file_name": file.filename,
         "file_url": file_url,
         "public_id": public_id,
+        "file_type": file_type,
+        "file_size": file_size,
+        "upload_timestamp": now_str,
+        "processing_status": "completed",
+        "extracted_text": extracted_text[:10000],  # Persist sample or full extracted text
         "extracted_data": extracted_data,
         "recommended_domains": recommended_domains,
         "created_at": now_str,
+        "updated_at": now_str,
     }
     FirestoreRepository.set_document("resumes", resume_id, doc)
 
-    # 5. Sync claimed skills and recommendations back to student profile
+    # 5. Sync claimed skills, resume URL, and recommendations back to student profile
     user_doc = FirestoreRepository.get_document("users", current_user.uid) or {"uid": current_user.uid}
     existing_claimed = set(user_doc.get("claimed_skills", []))
     new_claimed = set(extracted_data.get("claimed_skills", []))
@@ -111,6 +131,8 @@ async def upload_and_analyze_resume(
     user_doc["claimed_skills"] = merged_claimed
     user_doc["resume_url"] = file_url
     user_doc["resume_id"] = resume_id
+    user_doc["resume_public_id"] = public_id
+    user_doc["updated_at"] = now_str
     if recommended_domains and not user_doc.get("preferred_career_domains"):
         user_doc["preferred_career_domains"] = recommended_domains
 

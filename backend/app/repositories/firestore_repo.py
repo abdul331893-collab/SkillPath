@@ -66,56 +66,6 @@ def _load_store_from_disk():
 # Load immediately on module load
 _load_store_from_disk()
 
-def _ensure_default_seed():
-    """Seeds default demo accounts if missing."""
-    global _seeded
-    if _seeded:
-        return
-    _seeded = True
-
-    now_str = datetime.now(timezone.utc).isoformat()
-
-    # Default Demo Users
-    if "admin-demo-user-1" not in _memory_store["users"]:
-        _memory_store["users"]["admin-demo-user-1"] = {
-            "id": "admin-demo-user-1",
-            "uid": "admin-demo-user-1",
-            "email": "admin@skillpath.ai",
-            "name": "System Administrator",
-            "role": "admin",
-            "is_active": True,
-            "created_at": "2026-01-01T00:00:00Z",
-            "updated_at": now_str,
-        }
-    if "student-demo-user-1" not in _memory_store["users"]:
-        _memory_store["users"]["student-demo-user-1"] = {
-            "id": "student-demo-user-1",
-            "uid": "student-demo-user-1",
-            "email": "student@skillpath.ai",
-            "name": "Alex Mercer",
-            "role": "student",
-            "is_active": True,
-            "education_level": "Undergraduate",
-            "institution": "Stanford University",
-            "claimed_skills": ["React", "JavaScript", "Python", "FastAPI", "SQL & Databases"],
-            "technical_skills": ["React", "JavaScript", "Python"],
-            "validated_skills": {"React": 85.0, "JavaScript": 80.0, "Python": 75.0},
-            "projects": [
-                {
-                    "title": "E-Commerce Platform",
-                    "description": "Full-stack shopping application built with React and FastAPI.",
-                    "technologies": ["React", "JavaScript", "FastAPI", "SQL & Databases"]
-                }
-            ],
-            "completion_percentage": 75,
-            "created_at": "2026-01-01T00:00:00Z",
-            "updated_at": now_str,
-        }
-    _save_store_to_disk()
-
-# Run seed check
-_ensure_default_seed()
-
 def _get_firestore_client():
     """Returns Cloud Firestore client if initialized with valid credentials; else None."""
     security.init_firebase()
@@ -147,8 +97,7 @@ class FirestoreRepository:
             except Exception as e:
                 logger.warning(f"Firestore get_document error on {collection}/{doc_id}: {e}. Falling back to persistent storage.")
 
-        # Local persistent store fallback
-        _ensure_default_seed()
+        # Persistent store fallback
         coll = _memory_store.get(collection, {})
         res = coll.get(doc_id)
         if res:
@@ -202,8 +151,7 @@ class FirestoreRepository:
             except Exception as e:
                 logger.warning(f"Firestore update_document error on {collection}/{doc_id}: {e}. Updating local persistent storage.")
 
-        # Local persistent store fallback
-        _ensure_default_seed()
+        # Persistent store fallback
         coll = _memory_store.get(collection, {})
         if doc_id in coll:
             coll[doc_id].update(updates)
@@ -223,8 +171,7 @@ class FirestoreRepository:
             except Exception as e:
                 logger.warning(f"Firestore delete_document error on {collection}/{doc_id}: {e}")
 
-        # Local persistent store fallback
-        _ensure_default_seed()
+        # Persistent store fallback
         coll = _memory_store.get(collection, {})
         if doc_id in coll:
             del coll[doc_id]
@@ -262,8 +209,7 @@ class FirestoreRepository:
             except Exception as e:
                 logger.warning(f"Firestore query_documents error on {collection}: {e}. Querying persistent local storage.")
 
-        # Local persistent store fallback
-        _ensure_default_seed()
+        # Persistent store fallback
         coll = _memory_store.get(collection, {})
         results = []
         for doc in coll.values():
@@ -301,5 +247,4 @@ class FirestoreRepository:
                 return count_query.get()[0][0].value
             except Exception:
                 pass
-        _ensure_default_seed()
         return len(_memory_store.get(collection, {}))

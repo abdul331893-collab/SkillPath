@@ -24,6 +24,7 @@ def init_firebase():
         auth = fa_auth
         firestore = fa_firestore
 
+        g_cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
         if settings.FIREBASE_SERVICE_ACCOUNT_KEY:
             raw_key = settings.FIREBASE_SERVICE_ACCOUNT_KEY.strip()
             if os.path.exists(raw_key):
@@ -39,6 +40,12 @@ def init_firebase():
                 _firebase_initialized = True
                 _has_credentials = True
                 logger.info("Firebase Admin initialized via raw service account JSON string")
+        elif g_cred_path and os.path.exists(g_cred_path):
+            cred = credentials.Certificate(g_cred_path)
+            fa.initialize_app(cred)
+            _firebase_initialized = True
+            _has_credentials = True
+            logger.info("Firebase Admin initialized via GOOGLE_APPLICATION_CREDENTIALS file")
         elif settings.FIREBASE_PROJECT_ID and settings.FIREBASE_CLIENT_EMAIL and settings.FIREBASE_PRIVATE_KEY:
             clean_proj = settings.FIREBASE_PROJECT_ID.strip().strip('"').strip("'")
             clean_email = settings.FIREBASE_CLIENT_EMAIL.strip().strip('"').strip("'")

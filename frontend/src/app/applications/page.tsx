@@ -25,17 +25,44 @@ export default function ApplicationsPage() {
   const { user, token } = useAuth();
   const [applications, setApplications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<{ type: "auth" | "permission" | "network" | "server"; message: string } | null>(null);
   const [withdrawingId, setWithdrawingId] = useState<string | null>(null);
   const [selectedApp, setSelectedApp] = useState<any | null>(null);
 
   const loadApplications = async () => {
-    if (!token) return;
+    if (!token) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setError(null);
     try {
       const data = await apiRequest<any[]>("/applications/my", { token });
       setApplications(data || []);
     } catch (err: any) {
       console.error("Failed to load applications:", err);
+      const status = err.status;
+      if (status === 401) {
+        setError({
+          type: "auth",
+          message: "Authentication session expired or invalid. Please sign in again to access your applications."
+        });
+      } else if (status === 403) {
+        setError({
+          type: "permission",
+          message: "Access forbidden: You do not have permission to view these application records."
+        });
+      } else if (status === 408 || err.message?.includes("timed out") || err.message?.includes("Failed to fetch")) {
+        setError({
+          type: "network",
+          message: "Network connection error while connecting to Firestore API. Please check your internet connection."
+        });
+      } else {
+        setError({
+          type: "server",
+          message: err.message || "Failed to retrieve application records from Firestore."
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -50,6 +77,8 @@ export default function ApplicationsPage() {
       lastAppFetchKeyRef.current = fetchKey;
 
       loadApplications();
+    } else if (!user && !token) {
+      setLoading(false);
     }
   }, [user, token]);
 
@@ -129,6 +158,31 @@ export default function ApplicationsPage() {
             {[1, 2, 3].map((i) => (
               <div key={i} className="h-32 bg-slate-200 rounded-xl"></div>
             ))}
+          </div>
+        ) : error ? (
+          <div className="p-6 rounded-xl border border-rose-200 bg-rose-50 text-rose-900 space-y-3">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              <h3 className="font-bold text-sm">
+                {error.type === "auth"
+                  ? "Authentication Required"
+                  : error.type === "permission"
+                  ? "Access Forbidden"
+                  : error.type === "network"
+                  ? "Network Connection Error"
+                  : "Database Error"}
+              </h3>
+            </div>
+            <p className="text-xs text-rose-700 leading-relaxed">{error.message}</p>
+            <div className="pt-1">
+              <button
+                onClick={loadApplications}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold transition"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Retry Request</span>
+              </button>
+            </div>
           </div>
         ) : applications.length > 0 ? (
           <div className="space-y-4">
